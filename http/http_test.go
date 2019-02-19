@@ -1,6 +1,7 @@
 package httptest
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -238,4 +240,198 @@ func (t *trackLastConnectionListener) Accept() (net.Conn, error) {
 	*t.conn = conn
 
 	return conn, nil
+}
+
+func testTCPConnectionClose(t *testing.T, req string, handler http.Handler) {
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	conn, err := net.Dial(server.Listener.Addr().Network(), server.Listener.Addr().String())
+	if err != nil {
+		t.Errorf("Dial http server failed: %v", err)
+	}
+	defer conn.Close()
+
+	n, err := conn.Write([]byte(req))
+	if err != nil || n != len(req) {
+		t.Errorf("Write request failed: %v", err)
+	}
+
+	r := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(r, &http.Request{Method: "GET"})
+	if err != nil {
+		t.Errorf("Read response failed: %v", err)
+	}
+
+	donech := make(chan struct{})
+	go func() {
+		select {
+		case <-time.After(5 * time.Second):
+			t.Errorf("Timeout when waiting for reading finished")
+		case <-donech:
+		}
+	}()
+
+	_, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Errorf("Read from response body failed: %v", err)
+	}
+
+	donech <- struct{}{}
+
+	if !resp.Close {
+		t.Errorf("Connection should be closed")
+	}
+}
+
+func TestHTTP10Close(t *testing.T) {
+	testTCPConnectionClose(t, "GET / HTTP/1.0\r\n\r\n", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Do nothing.
+	}))
+}
+
+func TestClientCanClose(t *testing.T) {
+	testTCPConnectionClose(t, "GET / HTTP/1.1\r\nConnection: close\r\n\r\n", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Do nothing.
+	}))
+}
+
+func TestHandlerCanSetConnectionClose11(t *testing.T) {
+	testTCPConnectionClose(t, "GET / HTTP/1.1\r\n\r\n", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "close")
+	}))
+}
+
+func TestHandlerCanSetConnectionClose10(t *testing.T) {
+	testTCPConnectionClose(t, "GET / HTTP/1.0\r\nConnection: keep-alive\r\n\r\n", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "close")
+	}))
+}
+
+func TestContentLengthZero(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer server.Close()
+
+	versions := []string{"HTTP/1.0", "HTTP/1.1"}
+	for _, v := range versions {
+		conn, err := net.Dial(server.Listener.Addr().Network(), server.Listener.Addr().String())
+		if err != nil {
+			t.Errorf("Dial failed: %v", err)
+		}
+
+		fmt.Fprintf(conn, "GET / %v\r\nConnection: keep-alive\r\nHost: foo\r\n\r\n", v)
+
+		r := bufio.NewReader(conn)
+		req, err := http.NewRequest("GET", "/", nil)
+		if err != nil {
+			t.Errorf("Construct new request failed: %v", err)
+		}
+		resp, err := http.ReadResponse(r, req)
+		if err != nil {
+			t.Errorf("Read response failed: %v", err)
+		}
+
+		if len(resp.TransferEncoding) > 0 {
+			t.Errorf("The TransferEncoding should be 0")
+		}
+
+		if resp.ContentLength != 0 {
+			t.Errorf("The content length should be 0 otherthan %d", resp.ContentLength)
+		}
+
+		conn.Close()
+	}
+}
+
+func TestCloseNotifier(t *testing.T) {
+	godie := make(chan struct{})
+	closec := make(chan bool)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		godie <- struct{}{}
+		n, ok := w.(http.CloseNotifier)
+		if !ok {
+			t.Errorf("Asset ResponseWriter to CloseNotifier failed")
+		}
+		c := n.CloseNotify()
+		<-c
+		close(closec)
+	}))
+	defer server.Close()
+
+	conn, err := net.Dial(server.Listener.Addr().Network(), server.Listener.Addr().String())
+	if err != nil {
+		t.Errorf("Dial failed: %v", err)
+	}
+	fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: foo\r\n\r\n")
+	go func() {
+		<-godie
+		conn.Close()
+	}()
+
+	select {
+	case <-closec:
+		break
+	case <-time.After(5 * time.Second):
+		t.Errorf("Timeout waiting for close notifier channel")
+	}
+}
+
+func TestServerHijackGetBackgroundBytes(t *testing.T) {
+	done := make(chan struct{})
+	size := 8 << 10
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(done)
+
+		// HTTP server wait for the extra data after GET request.
+		select {
+		case <-w.(http.CloseNotifier).CloseNotify():
+		case <-time.After(5 * time.Second):
+			t.Errorf("Timeout waiting for connection being closed")
+		}
+
+		conn, b, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("Hijack failed: %v", err)
+		}
+
+		buf, err := ioutil.ReadAll(b)
+		if err != nil {
+			t.Errorf("Read hijack buffer failed: %v", err)
+		}
+
+		if len(buf) != size {
+			t.Errorf("Hijack buffer size, get %v, expect %v", len(buf), size)
+		}
+
+		flag := true
+		for _, b := range buf {
+			if b != 'x' {
+				flag = false
+			}
+		}
+		if flag == false {
+			t.Errorf("Include wrong bytes in hijack buffer")
+		}
+
+		conn.Close()
+	}))
+	defer server.Close()
+
+	conn, err := net.Dial(server.Listener.Addr().Network(), server.Listener.Addr().String())
+	if err != nil {
+		t.Errorf("Dial failed: %v", err)
+	}
+	defer conn.Close()
+	fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: foo\r\n\r\n%v", strings.Repeat("x", size))
+
+	err = conn.(*net.TCPConn).CloseWrite()
+	if err != nil {
+		t.Errorf("CloseWrite failed: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Errorf("Timeout waiting for request handling finished")
+	}
 }

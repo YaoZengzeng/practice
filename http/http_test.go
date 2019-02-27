@@ -3,12 +3,14 @@ package httptest
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"strings"
 	"sync"
 	"testing"
@@ -433,5 +435,32 @@ func TestServerHijackGetBackgroundBytes(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Errorf("Timeout waiting for request handling finished")
+	}
+}
+
+func TestWithClientTrace(t *testing.T) {
+	var buf bytes.Buffer
+	f := func(b byte) func(string, string) {
+		return func(network, addr string) {
+			buf.Write([]byte{b})
+		}
+	}
+
+	ctx := context.Background()
+
+	old := &httptrace.ClientTrace{
+		ConnectStart: f('O'),
+	}
+	ctx = httptrace.WithClientTrace(ctx, old)
+	trace := &httptrace.ClientTrace{
+		ConnectStart: f('N'),
+	}
+	ctx = httptrace.WithClientTrace(ctx, trace)
+
+	trace = httptrace.ContextClientTrace(ctx)
+	trace.ConnectStart("network", "addr")
+
+	if get, want := buf.String(), "NO"; get != want {
+		t.Errorf("Expect \"NO\", get %v", get)
 	}
 }

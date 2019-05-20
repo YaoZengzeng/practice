@@ -8,5 +8,6 @@ import (
 
 func init() {
 	beego.Router("/backend/prometheus/clusters/:cluster/namespaces/:namespace/pods/:pod", &controller.PrometheusController{}, "*:MonitorPod")
+	beego.Router("/backend/prometheus/clusters/:cluster/namespaces/:namespace/pods/:pod/metrics", &controller.PrometheusController{}, "*:PodMetrics")
 	beego.Router("/backend/prometheus/clusters/:cluster/nodes/:node", &controller.PrometheusController{}, "*:MonitorNode")
 }

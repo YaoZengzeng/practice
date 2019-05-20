@@ -32,6 +32,13 @@ const (
 	statusError   status = "error"
 )
 
+const (
+	NamespaceLabel = "kubernetes_namespace"
+	PodNameLabel = "kubernetes_pod_name"
+)
+
+const PrometheusURL = "http://127.0.0.1:9090"
+
 // queryData is just a wrapper to be compatible with the Prometheus API.
 type queryData struct {
 	ResultType string      `json:"resultType"`
@@ -89,7 +96,7 @@ func (p *PrometheusController) QueryPod() *queryResult {
 	pod := p.GetString(":pod")
 	logs.Info("cluster: %s, namespace: %s, pod: %s", cluster, namespace, pod)
 
-	client, err := p.getClient(&DataSource{Url: "http://localhost:9090"})
+	client, err := p.getClient(&DataSource{Url: PrometheusURL})
 	if err != nil {
 		return &queryResult{
 			Status:	statusError,
@@ -206,4 +213,52 @@ func (p *PrometheusController) MonitorPod() {
 
 func (p *PrometheusController) MonitorNode() {
 
+}
+
+func (p *PrometheusController) PodMetrics() {
+	w := p.Ctx.ResponseWriter
+
+	cluster := p.GetString(":cluster")
+	namespace := p.GetString(":namespace")
+	pod := p.GetString(":pod")
+	logs.Info("cluster: %s, namespace: %s, pod: %s", cluster, namespace, pod)
+
+	client, err := p.getClient(&DataSource{Url: PrometheusURL})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	match := fmt.Sprintf("{%s=\"%s\", %s=\"%s\"}", NamespaceLabel, namespace, PodNameLabel, pod)
+
+	end := time.Now()
+	start := end.Add(-10000 * time.Hour)
+
+	series, err := client.Series(context.Background(), []string{match}, start, end)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	metrics := []string{}
+	for _, s := range series {
+		metrics = append(metrics, string(s[model.LabelName("__name__")]))
+	}
+
+	logs.Info("metrics is %v\n", metrics)
+
+	queryResult := &queryResult{
+		Status:	statusSuccess,
+		Data:	metrics,
+	}
+	b, err := json.Marshal(queryResult)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return		
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if n, err := w.Write(b); err != nil {
+		logs.Error("Write response body failed: %v, bytesWritten: %v", err, n)
+	}	
 }

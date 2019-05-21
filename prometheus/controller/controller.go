@@ -14,10 +14,13 @@ import (
 	api "github.com/prometheus/client_golang/api"
 	apiv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
+	"github.com/YaoZengzeng/practice/prometheus/config"
 )
 
 type PrometheusController struct {
 	beego.Controller
+
+	Store Store
 }
 
 type DataSource struct {
@@ -37,8 +40,6 @@ const (
 	PodNameLabel = "kubernetes_pod_name"
 )
 
-const PrometheusURL = "http://127.0.0.1:9090"
-
 // queryData is just a wrapper to be compatible with the Prometheus API.
 type queryData struct {
 	ResultType string      `json:"resultType"`
@@ -49,6 +50,12 @@ type queryResult struct {
 	Status status      `json:"status"`
 	Data   interface{} `json:"data,omitempty"`
 	Error  string      `json:"error,omitempty"`
+}
+
+func NewPrometheusController() *PrometheusController {
+	return &PrometheusController{
+		Store:	NewMemoryStore(),
+	}
 }
 
 func (p *PrometheusController) getClient(dsInfo *DataSource) (apiv1.API, error) {
@@ -96,7 +103,7 @@ func (p *PrometheusController) QueryPod() *queryResult {
 	pod := p.GetString(":pod")
 	logs.Info("cluster: %s, namespace: %s, pod: %s", cluster, namespace, pod)
 
-	client, err := p.getClient(&DataSource{Url: PrometheusURL})
+	client, err := p.getClient(&DataSource{Url: config.PrometheusURL})
 	if err != nil {
 		return &queryResult{
 			Status:	statusError,
@@ -223,7 +230,7 @@ func (p *PrometheusController) PodMetrics() {
 	pod := p.GetString(":pod")
 	logs.Info("cluster: %s, namespace: %s, pod: %s", cluster, namespace, pod)
 
-	client, err := p.getClient(&DataSource{Url: PrometheusURL})
+	client, err := p.getClient(&DataSource{Url: config.PrometheusURL})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -240,9 +247,14 @@ func (p *PrometheusController) PodMetrics() {
 		return
 	}
 
-	metrics := []string{}
+	unique := make(map[string]struct{})
 	for _, s := range series {
-		metrics = append(metrics, string(s[model.LabelName("__name__")]))
+		unique[string(s[model.LabelName("__name__")])] = struct{}{}
+	}
+
+	var metrics []string
+	for metric, _ := range unique {
+		metrics = append(metrics, metric)
 	}
 
 	logs.Info("metrics is %v\n", metrics)
@@ -261,4 +273,52 @@ func (p *PrometheusController) PodMetrics() {
 	if n, err := w.Write(b); err != nil {
 		logs.Error("Write response body failed: %v, bytesWritten: %v", err, n)
 	}	
+}
+
+func (p *PrometheusController) PodMetricsRecords() {
+	cluster := p.GetString(":cluster")
+	namespace := p.GetString(":namespace")
+	pod := p.GetString(":pod")
+	logs.Info("cluster: %s, namespace: %s, pod: %s", cluster, namespace, pod)
+
+	r := p.Ctx.Request
+	w := p.Ctx.ResponseWriter
+	operation := r.Header.Get("Operation")
+
+	b := r.PostFormValue("metrics")
+	var metrics []string
+	err := json.Unmarshal([]byte(b), &metrics)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Deduplicate metrics.
+	unique := make(map[string]struct{})
+	for _, metric := range metrics {
+		unique[metric] = struct{}{}
+	}
+
+	metrics = nil
+	for metric, _ := range unique {
+		metrics = append(metrics, fmt.Sprintf("%s{%s=\"%s\", %s=\"%s\"}", metric, NamespaceLabel, namespace, PodNameLabel, pod))
+	}
+
+	id := fmt.Sprintf("%s-%s-%s", cluster, namespace, pod)
+	switch operation {
+	case "Add":
+		p.Store.AddPodMetricsRecords(id, metrics)
+
+	case "Delete":
+		p.Store.DeletePodMetricsRecords(id, metrics)
+
+	case "Reset":
+		p.Store.ResetPodMetricsRecords(id, metrics)
+
+	default:
+		http.Error(w, fmt.Errorf("undefined pod metrics records operation").Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }

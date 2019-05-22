@@ -40,6 +40,7 @@ const (
 	epLabelValues     = apiPrefix + "/label/:name/values"
 	epSeries          = apiPrefix + "/series"
 	epTargets         = apiPrefix + "/targets"
+	epTargetsMetadata = apiPrefix + "/targets/metadata"
 	epSnapshot        = apiPrefix + "/admin/tsdb/snapshot"
 	epDeleteSeries    = apiPrefix + "/admin/tsdb/delete_series"
 	epCleanTombstones = apiPrefix + "/admin/tsdb/clean_tombstones"
@@ -113,6 +114,19 @@ type API interface {
 	Snapshot(ctx context.Context, skipHead bool) (SnapshotResult, error)
 	// Targets returns an overview of the current state of the Prometheus target discovery.
 	Targets(ctx context.Context) (TargetsResult, error)
+	// TargetsMetadata returns metadata about metrics currently scraped by targets.
+	TargetsMetadata(ctx context.Context, matchTarget string) ([]MetricMetadata, error)
+}
+
+// TargetsMetadataResult contains the result from querying the targets metedata endpoints.
+type TargetsMetadataResult struct {
+	Data []MetricMetadata `json"metadata"`
+}
+
+// MetricMetadata contains metadata of a metric.
+type MetricMetadata struct {
+	Metric 	string 	`json:"metric"`
+	Type 	string 	`json:"type"`
 }
 
 // AlertManagersResult contains the result from querying the alertmanagers endpoint.
@@ -402,6 +416,29 @@ func (h *httpAPI) Series(ctx context.Context, matches []string, startTime time.T
 	var mset []model.LabelSet
 	err = json.Unmarshal(body, &mset)
 	return mset, err
+}
+
+func (h *httpAPI) TargetsMetadata(ctx context.Context, matchTarget string) ([]MetricMetadata, error) {
+	u := h.client.URL(epTargetsMetadata, nil)
+	q := u.Query()
+
+	q.Add("match_target", matchTarget)
+
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	_, body, err := h.client.Do(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []MetricMetadata
+	err = json.Unmarshal(body, &result)
+	return result, err
 }
 
 func (h *httpAPI) Snapshot(ctx context.Context, skipHead bool) (SnapshotResult, error) {

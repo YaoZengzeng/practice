@@ -222,9 +222,14 @@ func (p *PrometheusController) MonitorNode() {
 
 }
 
-func (p *PrometheusController) PodMetrics() {
-	w := p.Ctx.ResponseWriter
+type metricList struct {
+	Counter		[]string `json:"counter"`
+	Gauge 		[]string `json:"gauge"`
+	Summary		[]string `json:"summary"`
+	Histogram	[]string `json:"histogram"`
+}
 
+func (p *PrometheusController) QueryPodMetrics() *queryResult {
 	cluster := p.GetString(":cluster")
 	namespace := p.GetString(":namespace")
 	pod := p.GetString(":pod")
@@ -232,47 +237,66 @@ func (p *PrometheusController) PodMetrics() {
 
 	client, err := p.getClient(&DataSource{Url: config.PrometheusURL})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return &queryResult{
+			Status:	statusError,
+			Error:	fmt.Sprintf("Get Prometheus client failed: %v", err),
+		}
 	}
 
-	match := fmt.Sprintf("{%s=\"%s\", %s=\"%s\"}", NamespaceLabel, namespace, PodNameLabel, pod)
+	matchTarget := fmt.Sprintf("{%s=\"%s\", %s=\"%s\"}", NamespaceLabel, namespace, PodNameLabel, pod)
 
-	end := time.Now()
-	start := end.Add(-10000 * time.Hour)
-
-	series, err := client.Series(context.Background(), []string{match}, start, end)
+	metrics, err := client.TargetsMetadata(context.Background(), matchTarget)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return &queryResult{
+			Status:	statusError,
+			Error:	fmt.Sprintf("Get targets metadata failed: %v", err),
+		}
 	}
 
-	unique := make(map[string]struct{})
-	for _, s := range series {
-		unique[string(s[model.LabelName("__name__")])] = struct{}{}
+	mlist := &metricList{}
+	for _, metric := range metrics {
+		switch metric.Type {
+		case "counter":
+			mlist.Counter = append(mlist.Counter, metric.Metric)
+
+		case "gauge":
+			mlist.Gauge = append(mlist.Gauge, metric.Metric)
+
+		case "summary":
+			mlist.Summary = append(mlist.Summary, metric.Metric)
+
+		case "histogram":
+			mlist.Histogram = append(mlist.Histogram, metric.Metric)
+		}
 	}
 
-	var metrics []string
-	for metric, _ := range unique {
-		metrics = append(metrics, metric)
-	}
-
-	logs.Info("metrics is %v\n", metrics)
-
-	queryResult := &queryResult{
+	return &queryResult{
 		Status:	statusSuccess,
-		Data:	metrics,
+		Data:	mlist,
 	}
-	b, err := json.Marshal(queryResult)
+}
+
+func (p *PrometheusController) PodMetrics() {
+	w := p.Ctx.ResponseWriter
+
+	result := p.QueryPodMetrics()
+	b, err := json.Marshal(result)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return		
+		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	if result.Status == statusSuccess {
+		w.WriteHeader(http.StatusOK)
+	} else {
+		// More refined in the future.
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+
 	if n, err := w.Write(b); err != nil {
 		logs.Error("Write response body failed: %v, bytesWritten: %v", err, n)
-	}	
+	}
 }
 
 func (p *PrometheusController) PodMetricsRecords() {
@@ -321,4 +345,150 @@ func (p *PrometheusController) PodMetricsRecords() {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (p *PrometheusController) PodSeries() {
+	w := p.Ctx.ResponseWriter
+	result := p.QueryPodSeries()
+	b, err := json.Marshal(result)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if result.Status == statusSuccess {
+		w.WriteHeader(http.StatusOK)
+	} else {
+		// More refined in the future.
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+
+	if n, err := w.Write(b); err != nil {
+		logs.Error("Write response body failed: %v, bytesWritten: %v", err, n)
+	}
+}
+
+type series struct {
+	Name 	string 			`json:"name"`
+	Result 	model.Matrix 	`json:"result"`
+}
+
+func (p *PrometheusController) QueryPodSeries() *queryResult {
+	cluster := p.GetString(":cluster")
+	namespace := p.GetString(":namespace")
+	pod := p.GetString(":pod")
+	logs.Info("cluster: %s, namespace: %s, pod: %s", cluster, namespace, pod)
+
+	r := p.Ctx.Request
+
+	start, err := parseTime(r.FormValue("start"))
+	if err != nil {
+		return &queryResult{
+			Status:	statusError,
+			Error:	fmt.Sprintf("Parse start time failed: %v", err),
+		}
+	}
+
+	end, err := parseTime(r.FormValue("end"))
+	if err != nil {
+		return &queryResult{
+			Status:	statusError,
+			Error:	fmt.Sprintf("Parse end time failed: %v", err),
+		}
+	}
+
+	if end.Before(start) {
+		return &queryResult{
+			Status:	statusError,
+			Error:	fmt.Sprintf("End before start"),
+		}
+	}
+
+	step, err := parseDuration(r.FormValue("step"))
+	if err != nil {
+		return &queryResult{
+			Status:	statusError,
+			Error:	fmt.Sprintf("Parse step failed: %v", err),
+		}
+	}
+
+	if step <= 0 {
+		return &queryResult{
+			Status:	statusError,
+			Error:	fmt.Sprintf("Zero or negative query resolution step width are not accepted"),
+		}
+	}
+
+	timeRange := apiv1.Range{
+		Start: start,
+		End:   end,
+		Step:  step,
+	}
+
+	b := r.PostFormValue("metrics")
+	var metrics []string
+	err = json.Unmarshal([]byte(b), &metrics)
+	if err != nil {
+		return &queryResult{
+			Status:	statusError,
+			Error:	fmt.Sprintf("Unmarshal metrics from post form failed: %v", err),
+		}
+	}
+
+	var queries []string
+	for _, metric := range metrics {
+		queries = append(queries, fmt.Sprintf("%s{%s=\"%s\", %s=\"%s\"}", metric, NamespaceLabel, namespace, PodNameLabel, pod))
+	}
+
+	client, err := p.getClient(&DataSource{Url: config.PrometheusURL})
+	if err != nil {
+		return &queryResult{
+			Status:	statusError,
+			Error:	fmt.Sprintf("Get Prometheus client failed: %v", err),
+		}
+	}
+
+	// For a specific metric, the following labels are always same, so delete them.
+	unidentify := []model.LabelName{
+		model.MetricNameLabel,
+		model.JobLabel,
+		model.InstanceLabel,
+		NamespaceLabel,
+		PodNameLabel,
+	}
+
+	data := []*series{}
+	for i, query := range queries {
+		value, err := client.QueryRange(context.Background(), query, timeRange)
+		if err != nil {
+			return &queryResult{
+				Status:	statusError,
+				Error:	fmt.Sprintf("Query Prometheus failed: %v", err),
+			}
+		}
+		matrix, ok := value.(model.Matrix)
+		if !ok {
+			return &queryResult{
+				Status:	statusError,
+				Error:	fmt.Sprintf("The type of QueryRange value is unexpected"),
+			}
+		}
+
+		for _, label := range unidentify {
+			for _, sample := range matrix {
+				delete(sample.Metric, label)
+			}
+		}
+
+		data = append(data, &series{
+			Name:	metrics[i],
+			Result:	matrix,
+		})
+	}
+
+	return &queryResult{
+		Status:	statusSuccess,
+		Data:	data,
+	}
 }

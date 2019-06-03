@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: prometheus
+spec:
+  additionalScrapeConfigs:
+    name: additional-configs
+    key: prometheus-additional.yaml
+  serviceAccountName: prometheus-operator
+  serviceMonitorNamespaceSelector: {}
+  serviceMonitorSelector: {}
+  ruleSelector:
+    matchLabels:
+      role: alert-rules
+  alerting:
+    alertmanagers:
+    - name: example
+      namespace: default
+      port: web
+

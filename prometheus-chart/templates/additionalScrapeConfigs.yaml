@@ -1,0 +1,10 @@
+{{- if and .Values.prometheus.enabled .Values.prometheus.prometheusSpec.additionalScrapeConfigs }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: prometheus-scrape-confg
+  labels:
+    app: prometheus-scrape-confg
+data:
+  additional-scrape-configs.yaml: {{ toYaml .Values.prometheus.prometheusSpec.additionalScrapeConfigs | b64enc | quote }}
+{{- end }}

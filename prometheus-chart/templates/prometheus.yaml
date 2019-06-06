@@ -1,0 +1,87 @@
+{{- if .Values.prometheus.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+spec:
+{{- if .Values.prometheus.prometheusSpec.image }}
+  baseImage: {{ .Values.prometheus.prometheusSpec.image.repository }}
+  version: {{ .Values.prometheus.prometheusSpec.image.tag }}
+{{- end }}
+{{- if .Values.prometheus.prometheusSpec.scrapeInterval }}
+  scrapeInterval: {{ .Values.prometheus.prometheusSpec.scrapeInterval }}
+{{- end }}
+{{- if .Values.prometheus.prometheusSpec.evaluationInterval }}
+  evaluationInterval: {{ .Values.prometheus.prometheusSpec.evaluationInterval }}
+{{- end }}
+{{- if .Values.prometheus.prometheusSpec.resources }}
+  resources:
+{{ toYaml .Values.prometheus.prometheusSpec.resources | indent 4 }}
+{{- end }}
+  retention: {{ .Values.prometheus.prometheusSpec.retention | quote  }}
+{{- if .Values.prometheus.prometheusSpec.routePrefix }}
+  routePrefix: {{ .Values.prometheus.prometheusSpec.routePrefix | quote  }}
+{{- end }}
+{{- if .Values.prometheus.prometheusSpec.secrets }}
+  secrets:
+{{ toYaml .Values.prometheus.prometheusSpec.secrets | indent 4 }}
+{{- end }}
+{{- if .Values.prometheus.prometheusSpec.configMaps }}
+  configMaps:
+{{ toYaml .Values.prometheus.prometheusSpec.configMaps | indent 4 }}
+{{- end }}
+{{- if .Values.prometheus.prometheusSpec.serviceMonitorSelector }}
+  serviceMonitorSelector:
+{{ toYaml .Values.prometheus.prometheusSpec.serviceMonitorSelector | indent 4 }}
+{{ else if .Values.prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues  }}
+  serviceMonitorSelector:
+    matchLabels:
+      release: {{ .Release.Name | quote }}
+{{ else }}
+  serviceMonitorSelector: {}
+{{- end }}
+{{- if .Values.prometheus.prometheusSpec.serviceMonitorNamespaceSelector }}
+  serviceMonitorNamespaceSelector:
+{{ toYaml .Values.prometheus.prometheusSpec.serviceMonitorNamespaceSelector | indent 4 }}
+{{ else }}
+  serviceMonitorNamespaceSelector: {}
+{{- end }}
+{{- if .Values.prometheus.prometheusSpec.remoteRead }}
+  remoteRead:
+{{ toYaml .Values.prometheus.prometheusSpec.remoteRead | indent 4 }}
+{{- end }}
+{{- if .Values.prometheus.prometheusSpec.remoteWrite }}
+  remoteWrite:
+{{ toYaml .Values.prometheus.prometheusSpec.remoteWrite | indent 4 }}
+{{- end }}
+{{- if .Values.prometheus.prometheusSpec.securityContext }}
+  securityContext:
+{{ toYaml .Values.prometheus.prometheusSpec.securityContext | indent 4 }}
+{{- end }}
+{{- if .Values.prometheus.prometheusSpec.ruleNamespaceSelector }}
+  ruleNamespaceSelector:
+{{ toYaml .Values.prometheus.prometheusSpec.ruleNamespaceSelector | indent 4 }}
+{{ else }}
+  ruleNamespaceSelector: {}
+{{- end }}
+{{- if .Values.prometheus.prometheusSpec.storageSpec }}
+  storage:
+{{ toYaml .Values.prometheus.prometheusSpec.storageSpec | indent 4 }}
+{{- end }}
+{{- if .Values.prometheus.prometheusSpec.podMetadata }}
+  podMetadata:
+{{ toYaml .Values.prometheus.prometheusSpec.podMetadata | indent 4 }}
+{{- end }}
+{{- if .Values.prometheus.prometheusSpec.tolerations }}
+  tolerations:
+{{ toYaml .Values.prometheus.prometheusSpec.tolerations | indent 4 }}
+{{- end }}
+{{- if or .Values.prometheus.prometheusSpec.additionalScrapeConfigs .Values.prometheus.prometheusSpec.additionalScrapeConfigsExternal }}
+  additionalScrapeConfigs:
+    name: prometheus-scrape-confg
+    key: additional-scrape-configs.yaml
+{{- end }}
+{{- end }}
+

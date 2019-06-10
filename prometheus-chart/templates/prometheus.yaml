@@ -6,6 +6,11 @@ metadata:
   labels:
     app: prometheus
 spec:
+  alerting:
+    alertmanagers:
+      - namespace: {{ .Release.Namespace }}
+        name: alertmanager-example
+        port: web
 {{- if .Values.prometheus.prometheusSpec.image }}
   baseImage: {{ .Values.prometheus.prometheusSpec.image.repository }}
   version: {{ .Values.prometheus.prometheusSpec.image.tag }}

@@ -482,3 +482,286 @@ prometheus:
           ## Server name used to verify host name
           ##
           # serverName: ""
+
+## Configuration for alertmanager
+## ref: https://prometheus.io/docs/alerting/alertmanager/
+##
+alertmanager:
+
+  ## Deploy alertmanager
+  ##
+  enabled: true
+
+  ## Service account for Alertmanager to use.
+  ## ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
+  ##
+  serviceAccount:
+    create: true
+    name: ""
+
+  ## Configure pod disruption budgets for Alertmanager
+  ## ref: https://kubernetes.io/docs/tasks/run-application/configure-pdb/#specifying-a-poddisruptionbudget
+  ## This configuration is immutable once created and will require the PDB to be deleted to be changed
+  ## https://github.com/kubernetes/kubernetes/issues/45398
+  ##
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+    maxUnavailable: ""
+
+  ## Alertmanager configuration directives
+  ## ref: https://prometheus.io/docs/alerting/configuration/#configuration-file
+  ##      https://prometheus.io/webtools/alerting/routing-tree-editor/
+  ##
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      group_by: ['job']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      receiver: 'null'
+      routes:
+      - match:
+          alertname: Watchdog
+        receiver: 'null'
+    receivers:
+    - name: 'null'
+
+  ## Alertmanager template files to format alerts
+  ## ref: https://prometheus.io/docs/alerting/notifications/
+  ##      https://prometheus.io/docs/alerting/notification_examples/
+  ##
+  templateFiles: {}
+  #
+  # An example template:
+  #   template_1.tmpl: |-
+  #       {{ define "cluster" }}{{ .ExternalURL | reReplaceAll ".*alertmanager\\.(.*)" "$1" }}{{ end }}
+  #
+  #       {{ define "slack.myorg.text" }}
+  #       {{- $root := . -}}
+  #       {{ range .Alerts }}
+  #         *Alert:* {{ .Annotations.summary }} - `{{ .Labels.severity }}`
+  #         *Cluster:*  {{ template "cluster" $root }}
+  #         *Description:* {{ .Annotations.description }}
+  #         *Graph:* <{{ .GeneratorURL }}|:chart_with_upwards_trend:>
+  #         *Runbook:* <{{ .Annotations.runbook }}|:spiral_note_pad:>
+  #         *Details:*
+  #           {{ range .Labels.SortedPairs }} • *{{ .Name }}:* `{{ .Value }}`
+  #           {{ end }}
+
+  ingress:
+    enabled: false
+
+    annotations: {}
+
+    labels: {}
+
+    ## Hosts must be provided if Ingress is enabled.
+    ##
+    hosts: []
+      # - alertmanager.domain.com
+
+    ## Paths to use for ingress rules - one path should match the alertmanagerSpec.routePrefix
+    ##
+    paths: []
+    # - /
+
+    ## TLS configuration for Alertmanager Ingress
+    ## Secret must be manually created in the namespace
+    ##
+    tls: []
+    # - secretName: alertmanager-general-tls
+    #   hosts:
+    #   - alertmanager.example.com
+
+  ## Configuration for Alertmanager service
+  ##
+  service:
+    annotations: {}
+    labels: {}
+    clusterIP: ""
+
+  ## Port to expose on each node
+  ## Only used if service.type is 'NodePort'
+  ##
+    nodePort: 30903
+  ## List of IP addresses at which the Prometheus server service is available
+  ## Ref: https://kubernetes.io/docs/user-guide/services/#external-ips
+  ##
+    externalIPs: []
+    loadBalancerIP: ""
+    loadBalancerSourceRanges: []
+    ## Service type
+    ##
+    type: ClusterIP
+
+  ## If true, create a serviceMonitor for alertmanager
+  ##
+  serviceMonitor:
+    ## Scrape interval. If not set, the Prometheus default scrape interval is used.
+    ##
+    interval: ""
+    selfMonitor: true
+
+    ##  metric relabel configs to apply to samples before ingestion.
+    ##
+    metricRelabelings: []
+    # - action: keep
+    #   regex: 'kube_(daemonset|deployment|pod|namespace|node|statefulset).+'
+    #   sourceLabels: [__name__]
+
+    #   relabel configs to apply to samples before ingestion.
+    ##
+    relabelings: []
+    # - sourceLabels: [__meta_kubernetes_pod_node_name]
+    #   separator: ;
+    #   regex: ^(.*)$
+    #   target_label: nodename
+    #   replacement: $1
+    #   action: replace
+
+  ## Settings affecting alertmanagerSpec
+  ## ref: https://github.com/coreos/prometheus-operator/blob/master/Documentation/api.md#alertmanagerspec
+  ##
+  alertmanagerSpec:
+    ## Standard object’s metadata. More info: https://github.com/kubernetes/community/blob/master/contributors/devel/api-conventions.md#metadata
+    ## Metadata Labels and Annotations gets propagated to the Alertmanager pods.
+    ##
+    podMetadata: {}
+
+    ## Image of Alertmanager
+    ##
+    image:
+      repository: quay.io/prometheus/alertmanager
+      tag: v0.17.0
+
+    ## If true then the user will be responsible to provide a secret with alertmanager configuration
+    ## So when true the config part will be ignored (including templateFiles) and the one in the secret will be used
+    ##
+    useExistingSecret: false
+
+    ## Secrets is a list of Secrets in the same namespace as the Alertmanager object, which shall be mounted into the
+    ## Alertmanager Pods. The Secrets are mounted into /etc/alertmanager/secrets/.
+    ##
+    secrets: []
+
+    ## ConfigMaps is a list of ConfigMaps in the same namespace as the Alertmanager object, which shall be mounted into the Alertmanager Pods.
+    ## The ConfigMaps are mounted into /etc/alertmanager/configmaps/.
+    ##
+    configMaps: []
+
+    ## Log level for Alertmanager to be configured with.
+    ##
+    logLevel: info
+
+    ## Size is the expected size of the alertmanager cluster. The controller will eventually make the size of the
+    ## running cluster equal to the expected size.
+    replicas: 1
+
+    ## Time duration Alertmanager shall retain data for. Default is '120h', and must match the regular expression
+    ## [0-9]+(ms|s|m|h) (milliseconds seconds minutes hours).
+    ##
+    retention: 120h
+
+    ## Storage is the definition of how storage will be used by the Alertmanager instances.
+    ## ref: https://github.com/coreos/prometheus-operator/blob/master/Documentation/user-guides/storage.md
+    ##
+    storage: {}
+    # volumeClaimTemplate:
+    #   spec:
+    #     storageClassName: gluster
+    #     accessModes: ["ReadWriteOnce"]
+    #     resources:
+    #       requests:
+    #         storage: 50Gi
+    #   selector: {}
+
+
+    ##  The external URL the Alertmanager instances will be available under. This is necessary to generate correct URLs. This is necessary if Alertmanager is not served from root of a DNS name.   string  false
+    ##
+    externalUrl:
+
+    ##  The route prefix Alertmanager registers HTTP handlers for. This is useful, if using ExternalURL and a proxy is rewriting HTTP routes of a request, and the actual ExternalURL is still true,
+    ## but the server serves requests under a different route prefix. For example for use with kubectl proxy.
+    ##
+    routePrefix: /
+
+    ## If set to true all actions on the underlying managed objects are not going to be performed, except for delete actions.
+    ##
+    paused: false
+
+    ## Define which Nodes the Pods are scheduled on.
+    ## ref: https://kubernetes.io/docs/user-guide/node-selection/
+    ##
+    nodeSelector: {}
+
+    ## Define resources requests and limits for single Pods.
+    ## ref: https://kubernetes.io/docs/user-guide/compute-resources/
+    ##
+    resources: {}
+    # requests:
+    #   memory: 400Mi
+
+    ## Pod anti-affinity can prevent the scheduler from placing Prometheus replicas on the same node.
+    ## The default value "soft" means that the scheduler should *prefer* to not schedule two replica pods onto the same node but no guarantee is provided.
+    ## The value "hard" means that the scheduler is *required* to not schedule two replica pods onto the same node.
+    ## The value "" will disable pod anti-affinity so that no anti-affinity rules will be configured.
+    ##
+    podAntiAffinity: ""
+
+    ## If anti-affinity is enabled sets the topologyKey to use for anti-affinity.
+    ## This can be changed to, for example, failure-domain.beta.kubernetes.io/zone
+    ##
+    podAntiAffinityTopologyKey: kubernetes.io/hostname
+
+    ## Assign custom affinity rules to the alertmanager instance
+    ## ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/
+    ##
+    affinity: {}
+    # nodeAffinity:
+    #   requiredDuringSchedulingIgnoredDuringExecution:
+    #     nodeSelectorTerms:
+    #     - matchExpressions:
+    #       - key: kubernetes.io/e2e-az-name
+    #         operator: In
+    #         values:
+    #         - e2e-az1
+    #         - e2e-az2
+
+    ## If specified, the pod's tolerations.
+    ## ref: https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
+    ##
+    tolerations: []
+    # - key: "key"
+    #   operator: "Equal"
+    #   value: "value"
+    #   effect: "NoSchedule"
+
+    ## SecurityContext holds pod-level security attributes and common container settings.
+    ## This defaults to non root user with uid 1000 and gid 2000.   *v1.PodSecurityContext  false
+    ## ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+    ##
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      fsGroup: 2000
+
+    ## ListenLocal makes the Alertmanager server listen on loopback, so that it does not bind against the Pod IP.
+    ## Note this is only for the Alertmanager UI, not the gossip communication.
+    ##
+    listenLocal: false
+
+    ## Containers allows injecting additional containers. This is meant to allow adding an authentication proxy to an Alertmanager pod.
+    ##
+    containers: []
+
+    ## Priority class assigned to the Pods
+    ##
+    priorityClassName: ""
+
+    ## AdditionalPeers allows injecting a set of additional Alertmanagers to peer with to form a highly available cluster.
+    ##
+    additionalPeers: []
+

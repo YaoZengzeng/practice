@@ -433,6 +433,7 @@ func (f *DeltaFIFO) Pop(process PopProcessFunc) (interface{}, error) {
 			continue
 		}
 		delete(f.items, id)
+		fmt.Printf("DeltaFIFO's Pop method pod item %v\n", item)
 		err := process(item)
 		if e, ok := err.(ErrRequeue); ok {
 			f.addIfNotPresent(id, item)
@@ -466,6 +467,7 @@ func (f *DeltaFIFO) Replace(list []interface{}, resourceVersion string) error {
 
 	if f.knownObjects == nil {
 		// Do deletion detection against our own list.
+		fmt.Printf("f.knownObjects is nil in DeltaFIFO's Replace\n")
 		queuedDeletions := 0
 		for k, oldItem := range f.items {
 			if keys.Has(k) {
@@ -491,6 +493,8 @@ func (f *DeltaFIFO) Replace(list []interface{}, resourceVersion string) error {
 		return nil
 	}
 
+	fmt.Printf("f.knownObjects is not nil in DeltaFIFO's Replace\n")
+
 	// Detect deletions not already in the queue.
 	knownKeys := f.knownObjects.ListKeys()
 	queuedDeletions := 0
@@ -508,6 +512,7 @@ func (f *DeltaFIFO) Replace(list []interface{}, resourceVersion string) error {
 			klog.Infof("Key %v does not exist in known objects store, placing DeleteFinalStateUnknown marker without object", k)
 		}
 		queuedDeletions++
+		fmt.Printf("Construct DeletedFinalStateUnknown object in Replace for %v\n", k)
 		if err := f.queueActionLocked(Deleted, DeletedFinalStateUnknown{k, deletedObj}); err != nil {
 			return err
 		}
@@ -532,6 +537,7 @@ func (f *DeltaFIFO) Resync() error {
 
 	keys := f.knownObjects.ListKeys()
 	for _, k := range keys {
+		fmt.Printf("Sync key %v in DeltaFIFO's Resync method", k)
 		if err := f.syncKeyLocked(k); err != nil {
 			return err
 		}

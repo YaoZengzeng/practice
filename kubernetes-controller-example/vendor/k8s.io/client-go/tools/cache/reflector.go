@@ -157,6 +157,7 @@ func (r *Reflector) resyncChan() (<-chan time.Time, func() bool) {
 // and then use the resource version to watch.
 // It returns error if ListAndWatch didn't even try to initialize watch.
 func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
+	fmt.Printf("ListAndWatch of Reflector being called\n")
 	klog.V(3).Infof("Listing and watching %v from %s", r.expectedType, r.name)
 	var resourceVersion string
 
@@ -181,6 +182,7 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 			// Attempt to gather list in chunks, if supported by listerWatcher, if not, the first
 			// list request will return the full response.
 			pager := pager.New(pager.SimplePageFunc(func(opts metav1.ListOptions) (runtime.Object, error) {
+				fmt.Printf("Calling List in ListAndWatch\n")
 				return r.listerWatcher.List(opts)
 			}))
 			if r.WatchListPageSize != 0 {
@@ -241,6 +243,7 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 			}
 			if r.ShouldResync == nil || r.ShouldResync() {
 				klog.V(4).Infof("%s: forcing resync", r.name)
+				fmt.Printf("Calling r.store.Resync() in ListAndWatch\n")
 				if err := r.store.Resync(); err != nil {
 					resyncerrc <- err
 					return
@@ -317,6 +320,7 @@ func (r *Reflector) syncWith(items []runtime.Object, resourceVersion string) err
 
 // watchHandler watches w and keeps *resourceVersion up to date.
 func (r *Reflector) watchHandler(w watch.Interface, resourceVersion *string, errc chan error, stopCh <-chan struct{}) error {
+	fmt.Printf("Calling watchHandler\n")
 	start := r.clock.Now()
 	eventCount := 0
 
@@ -348,6 +352,7 @@ loop:
 				continue
 			}
 			newResourceVersion := meta.GetResourceVersion()
+			fmt.Printf("NewResourceVersion is %v\n", newResourceVersion)
 			switch event.Type {
 			case watch.Added:
 				err := r.store.Add(event.Object)

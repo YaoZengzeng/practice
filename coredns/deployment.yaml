@@ -1,0 +1,19 @@
+apiVersion: apps/v1beta1
+kind: Deployment
+metadata:
+  name: dnsquery
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: dnsquery
+    spec:
+      containers:
+      - name: dnsquery
+        image: dnsquery:v0.1.0
+        imagePullPolicy: IfNotPresent
+        args:
+          - --host=www.google.com
+          - --concurrency=1000
+

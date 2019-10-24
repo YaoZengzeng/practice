@@ -25,3 +25,6 @@ Deploy prometheus operator, prometheus and alertmanager with yaml
 
 Scripts to query prometheus http API
 
+## memberlist
+
+Example of hashicorp/memberlist

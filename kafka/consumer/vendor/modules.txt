@@ -1,0 +1,3 @@
+# github.com/segmentio/kafka-go v0.3.4
+github.com/segmentio/kafka-go
+github.com/segmentio/kafka-go/sasl

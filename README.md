@@ -28,3 +28,7 @@ Scripts to query prometheus http API
 ## memberlist
 
 Example of hashicorp/memberlist
+
+## kafka
+
+Manifest used to deploy a simple kafka cluster. Simple golang producer and consumer could be used to test

@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	brokers = flag.String("brokers", "192.168.0.104:9092", "list of address of brokers")
-	topic   = flag.String("topic", "test", "kafka topic")
+	brokers = flag.String("brokers", "172.16.0.26:9092", "list of address of brokers")
+	topic   = flag.String("topic", "mytopic", "kafka topic")
 	groupID = flag.String("group", "", "id of consumer group")
 )
 

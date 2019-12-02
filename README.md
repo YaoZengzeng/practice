@@ -32,3 +32,7 @@ Example of hashicorp/memberlist
 ## kafka
 
 Manifest used to deploy a simple kafka cluster. Simple golang producer and consumer could be used to test
+
+## endpoints
+
+Example of demonstrating the fundamental operations for managing on Kubernetes endpoint resources, such as Create, List, Update and Delete
